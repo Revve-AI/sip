@@ -97,7 +97,7 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 	tr := TransportFrom(sipConf.transport)
 	contact := c.ContactURI(tr)
 	if sipConf.host == "" {
-		sipConf.host = contact.GetHost()
+		sipConf.host = "v2.stringee.com"
 	}
 	call := &outboundCall{
 		c:         c,
@@ -109,7 +109,7 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 	}
 	call.log = call.log.WithValues("jitterBuf", call.jitterBuf)
 	call.cc = c.newOutbound(log, id, URI{
-		User:      sipConf.from,
+		User:      "1167400_revveai_agent_01",
 		Host:      sipConf.host,
 		Addr:      contact.Addr,
 		Transport: tr,
@@ -650,9 +650,15 @@ func (c *outboundCall) transferCall(ctx context.Context, transferTo string, head
 
 func (c *Client) newOutbound(log logger.Logger, id LocalTag, from, contact URI, getHeaders setHeadersFunc) *sipOutbound {
 	from = from.Normalize()
+	fromURI := sip.Uri{
+		Scheme: from.GetURI().Scheme,
+		User:   from.GetURI().User,
+		Host:   from.GetURI().Host,
+		// Deliberately omit Port field
+	}
 	fromHeader := &sip.FromHeader{
 		DisplayName: from.User,
-		Address:     *from.GetURI(),
+		Address:     fromURI,
 		Params:      sip.NewParams(),
 	}
 	contactHeader := &sip.ContactHeader{
@@ -846,12 +852,12 @@ authLoop:
 		return nil, errors.New("no tag in To header in INVITE response")
 	}
 
-	if cont := resp.Contact(); cont != nil {
-		req.Recipient = cont.Address
-		if req.Recipient.Port == 0 {
-			req.Recipient.Port = 5060
-		}
-	}
+	//if cont := resp.Contact(); cont != nil {
+	//	req.Recipient = cont.Address
+	//	if req.Recipient.Port == 0 {
+	//		req.Recipient.Port = 5060
+	//	}
+	//}
 
 	if recordRouteHeader := resp.RecordRoute(); recordRouteHeader != nil {
 		req.AppendHeader(&sip.RouteHeader{Address: recordRouteHeader.Address})

@@ -1,0 +1,19 @@
+  port: 7880
+  log_level: debug
+  rtc:
+    tcp_port: 7881
+    port_range_start: 50000
+    port_range_end: 60000
+    # Not needed for local development
+    use_external_ip: false
+  redis:
+    # Use localhost for your local Redis instance
+    address: localhost:6379
+  keys:
+    # Development key-value pairs
+    devkey: secret
+  # Enable metrics for local debugging if needed
+  prometheus_port: 6789
+  # TURN not needed for local development
+  turn:
+    enabled: false
