@@ -99,6 +99,10 @@ type Config struct {
 	EnableJitterBuffer     bool    `yaml:"enable_jitter_buffer"`
 	EnableJitterBufferProb float64 `yaml:"enable_jitter_buffer_prob"`
 
+	// DeepFilterNet2 noise suppression configuration
+	EnableDeepFilterNet2     bool   `yaml:"enable_deepfilternet2"`
+	DeepFilterNet2ModelsPath string `yaml:"deepfilternet2_models_path"`
+
 	// internal
 	ServiceName string `yaml:"-"`
 	NodeID      string // Do not provide, will be overwritten

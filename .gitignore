@@ -5,3 +5,6 @@ cmd/server/server
 
 test/config.yaml
 test/*/*.mkv
+/onnxruntime-osx-arm64-1.22.0/
+/onnxruntime-osx-arm64-1.16.3/
+/DeepFilterNet-main/
