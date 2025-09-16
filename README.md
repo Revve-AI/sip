@@ -140,7 +140,7 @@ The SIP service can be run natively on any platform supported by libpous.
 
 The SIP service is built in Go. Go >= 1.18 is needed. The SIP services uses [libopus](https://opus-codec.org/) and must be installed externally:
 
-For Debian
+For Debian version
 
 ```
 sudo apt-get install pkg-config libopus-dev libopusfile-dev libsoxr-dev
