@@ -106,8 +106,10 @@ func (c *udpConn) Read(b []byte) (n int, err error) {
 func (c *udpConn) Write(b []byte) (n int, err error) {
 	dst := c.dst.Load()
 	if dst == nil {
+		c.log.Debugw("RTP write ignored - no destination set", "bytes", len(b))
 		return len(b), nil // ignore
 	}
+	c.log.Debugw("Sending RTP packet", "bytes", len(b), "dst", dst.String())
 	return c.WriteToUDPAddrPort(b, *dst)
 }
 
@@ -388,6 +390,7 @@ func (p *MediaPort) SetConfig(c *MediaConf) error {
 		"srtp", crypto,
 	)
 
+	p.log.Infow("Setting RTP destination from SDP", "remote", c.Remote.String())
 	p.port.SetDst(c.Remote)
 	var (
 		sess rtp.Session

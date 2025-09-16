@@ -492,6 +492,7 @@ func (s *Server) newInboundCall(
 }
 
 func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkID string, conf *config.Config) error {
+	c.log.Infow("Starting handleInvite", "trunkID", trunkID)
 	c.mon.InviteAccept()
 	c.mon.CallStart()
 	defer c.mon.CallEnd()
@@ -503,6 +504,7 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 	}
 
 	c.cc.StartRinging()
+	c.log.Infow("Dispatching call to handler")
 	// Send initial request. In the best case scenario, we will immediately get a room name to join.
 	// Otherwise, we could even learn that this number is not allowed and reject the call, or ask for pin if required.
 	disp := c.s.handler.DispatchCall(ctx, &CallInfo{
@@ -511,6 +513,7 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 		Pin:     "",
 		NoPin:   false,
 	})
+	c.log.Infow("Dispatch call completed", "result", disp.Result)
 	if disp.ProjectID != "" {
 		c.log = c.log.WithValues("projectID", disp.ProjectID)
 		c.projectID = disp.ProjectID
@@ -555,6 +558,10 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 	}
 
 	runMedia := func(enc livekit.SIPMediaEncryption) ([]byte, error) {
+		c.log.Infow("Starting media setup",
+			"encryption", enc,
+			"sdpOfferSize", len(req.Body()),
+			"enabledFeatures", disp.EnabledFeatures)
 		answerData, err := c.runMediaConn(req.Body(), enc, conf, disp.EnabledFeatures)
 		if err != nil {
 			isError := true
@@ -575,6 +582,7 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 			c.close(true, status, reason)
 			return nil, err
 		}
+		c.log.Infow("Media setup completed successfully", "sdpAnswerSize", len(answerData))
 		return answerData, nil
 	}
 
@@ -585,23 +593,33 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 		if r := c.lkRoom.Room(); r != nil {
 			headers = AttrsToHeaders(r.LocalParticipant.Attributes(), c.attrsToHdr, headers)
 		}
-		c.log.Infow("Accepting the call", "headers", headers)
+		c.log.Infow("Accepting the call", "headers", headers, "sdpAnswerSize", len(answerData))
 		if err := c.cc.Accept(ctx, answerData, headers); err != nil {
 			c.log.Errorw("Cannot respond to INVITE", err)
 			return false, err
 		}
+		c.log.Infow("SIP 200 OK sent successfully, enabling RTP output")
 		c.media.EnableTimeout(true)
 		c.media.EnableOut()
+		c.log.Infow("RTP output enabled, media can now flow to provider",
+			"timeoutEnabled", true,
+			"outputEnabled", true)
 		if ok, err := c.waitMedia(ctx); !ok {
 			return false, err
 		}
 		c.setStatus(CallActive)
+		c.log.Infow("Call fully established and active", "status", "CallActive")
 		return true, nil
 	}
 
 	ok := false
 	var answerData []byte
+	c.log.Infow("Starting media setup phase",
+		"pinPrompt", pinPrompt,
+		"mediaEncryption", disp.MediaEncryption)
+
 	if pinPrompt {
+		c.log.Infow("Pin prompt flow - setting up media first")
 		var err error
 		// Accept the call first on the SIP side, so that we can send audio prompts.
 		// This also means we have to pick encryption setting early, before room is selected.
@@ -618,12 +636,15 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 			return err // already sent a response. Could be success if user hung up
 		}
 	} else {
+		c.log.Infow("Normal flow - setting up media now")
 		// Start media with given encryption settings.
 		var err error
 		answerData, err = runMedia(disp.MediaEncryption)
 		if err != nil {
+			c.log.Errorw("runMedia failed in normal flow", err)
 			return err // already sent a response
 		}
+		c.log.Infow("runMedia completed successfully in normal flow")
 	}
 	p := &disp.Room.Participant
 	p.Attributes = HeadersToAttrs(p.Attributes, disp.HeadersToAttributes, disp.IncludeHeaders, c.cc, nil)
@@ -644,12 +665,14 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 		return errors.Wrap(err, "failed joining room")
 	}
 	// Publish our own track.
+	c.log.Infow("Setting up audio bridge: RTP from provider -> LiveKit room")
 	if err := c.publishTrack(); err != nil {
 		c.log.Errorw("Cannot publish track", err)
 		c.close(true, callDropped, "publish-failed")
 		return errors.Wrap(err, "publishing track to room failed")
 	}
 	c.lkRoom.Subscribe()
+	c.log.Infow("Subscribed to LiveKit room, waiting for participants")
 	if !pinPrompt {
 		c.log.Infow("Waiting for track subscription(s)")
 		// For dispatches without pin, we first wait for LK participant to become available,
@@ -657,6 +680,7 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 		if ok, err := c.waitSubscribe(ctx, disp.RingingTimeout); !ok {
 			return err // already sent a response. Could be success if caller hung up
 		}
+		c.log.Infow("LiveKit room ready, accepting SIP call and enabling bidirectional audio")
 		if ok, err := acceptCall(answerData); !ok {
 			return err // already sent a response. Could be success if caller hung up
 		}
@@ -701,6 +725,12 @@ func (c *inboundCall) handleInvite(ctx context.Context, req *sip.Request, trunkI
 func (c *inboundCall) runMediaConn(offerData []byte, enc livekit.SIPMediaEncryption, conf *config.Config, features []livekit.SIPFeature) (answerData []byte, _ error) {
 	c.mon.SDPSize(len(offerData), true)
 	c.log.Debugw("SDP offer", "sdp", string(offerData))
+	c.log.Infow("Starting media connection setup for inbound call",
+		"mediaIP", c.s.sconf.MediaIP,
+		"rtpPorts", conf.RTPPort,
+		"encryption", enc,
+		"jitterBuffer", c.jitterBuf)
+
 	e, err := sdpEncryption(enc)
 	if err != nil {
 		c.log.Errorw("Cannot parse encryption", err)
@@ -716,42 +746,63 @@ func (c *inboundCall) runMediaConn(offerData []byte, enc livekit.SIPMediaEncrypt
 		Stats:               &c.stats.Port,
 	}, RoomSampleRate)
 	if err != nil {
+		c.log.Errorw("Failed to create MediaPort", err)
 		return nil, err
 	}
 	c.media = mp
+	c.log.Infow("MediaPort created successfully", "localIP", c.s.sconf.MediaIP)
+
 	c.media.EnableTimeout(false) // enabled once we accept the call
 	c.media.DisableOut()         // disabled until we send 200
 	c.media.SetDTMFAudio(conf.AudioDTMF)
+	c.log.Infow("Media output disabled until call accepted", "rtpOutputEnabled", false)
 
 	answer, mconf, err := mp.SetOffer(offerData, e)
 	if err != nil {
+		c.log.Errorw("Failed to process SDP offer", err)
 		return nil, err
 	}
 	answerData, err = answer.SDP.Marshal()
 	if err != nil {
+		c.log.Errorw("Failed to marshal SDP answer", err)
 		return nil, err
 	}
 	c.mon.SDPSize(len(answerData), false)
 	c.log.Debugw("SDP answer", "sdp", string(answerData))
+	c.log.Infow("SDP negotiation completed",
+		"localRTPPort", mp.Port(),
+		"remoteAddr", mconf.Remote.String(),
+		"codec", mconf.Audio.Codec.Info().SDPName)
 
 	mconf.Processor = c.s.handler.GetMediaProcessor(features)
+	c.log.Infow("Setting media configuration",
+		"remote", mconf.Remote.String(),
+		"hasProcessor", mconf.Processor != nil)
 	if err = c.media.SetConfig(mconf); err != nil {
+		c.log.Errorw("Failed to set media config", err)
 		return nil, err
 	}
+	c.log.Infow("Media configuration set successfully")
 	if mconf.Audio.DTMFType != 0 {
 		c.media.HandleDTMF(c.handleDTMF)
 	}
 
 	// Must be set earlier to send the pin prompts.
+	c.log.Infow("Connecting LiveKit room audio output to RTP stream")
 	if w := c.lkRoom.SwapOutput(c.media.GetAudioWriter()); w != nil {
+		c.log.Infow("Replaced existing audio output writer")
 		_ = w.Close()
 	}
+	c.log.Infow("Audio bridge established: LiveKit room -> RTP to provider",
+		"audioWriter", "connected")
 	if mconf.Audio.DTMFType != 0 {
+		c.log.Infow("Setting up DTMF output", "dtmfType", mconf.Audio.DTMFType)
 		c.lkRoom.SetDTMFOutput(c.media)
 	}
 	c.state.DeferUpdate(func(info *livekit.SIPCallInfo) {
 		info.AudioCodec = mconf.Audio.Codec.Info().SDPName
 	})
+	c.log.Infow("Media connection setup completed", "audioCodec", mconf.Audio.Codec.Info().SDPName)
 	return answerData, nil
 }
 
@@ -765,23 +816,35 @@ func (c *inboundCall) waitMedia(ctx context.Context) (bool, error) {
 	//
 	// Thus, we wait at most a fixed amount of time before bridging audio.
 
+	c.log.Infow("Waiting for media before bridging audio",
+		"maxDelay", audioBridgeMaxDelay,
+		"waitingForRTP", true)
+
 	delay := time.NewTimer(audioBridgeMaxDelay)
 	defer delay.Stop()
 	select {
 	case <-c.cc.Cancelled():
+		c.log.Infow("Call cancelled while waiting for media")
 		c.closeWithCancelled()
 		return false, nil // caller hung up
 	case <-ctx.Done():
+		c.log.Infow("Context done while waiting for media")
 		c.closeWithHangup()
 		return false, nil // caller hung up
 	case <-c.lkRoom.Closed():
+		c.log.Infow("Room closed while waiting for media")
 		c.closeWithHangup()
 		return false, psrpc.NewErrorf(psrpc.Canceled, "room closed")
 	case <-c.media.Timeout():
+		c.log.Errorw("Media timeout while waiting for RTP", nil)
 		c.closeWithTimeout()
 		return false, psrpc.NewErrorf(psrpc.DeadlineExceeded, "media timed out")
 	case <-c.media.Received():
+		c.log.Infow("First RTP packet received from caller, bridging audio now")
 	case <-delay.C:
+		c.log.Infow("Max delay reached without RTP, bridging audio anyway",
+			"delayExpired", audioBridgeMaxDelay,
+			"rtpReceived", false)
 	}
 	return true, nil
 }
@@ -1004,12 +1067,16 @@ func (c *inboundCall) createLiveKitParticipant(ctx context.Context, rconf RoomCo
 }
 
 func (c *inboundCall) publishTrack() error {
+	c.log.Infow("Publishing audio track to LiveKit room", "sampleRate", RoomSampleRate)
 	local, err := c.lkRoom.NewParticipantTrack(RoomSampleRate)
 	if err != nil {
+		c.log.Errorw("Failed to create participant track", err)
 		_ = c.lkRoom.Close()
 		return err
 	}
+	c.log.Infow("Connecting RTP media to LiveKit track for outbound audio")
 	c.media.WriteAudioTo(local)
+	c.log.Infow("Audio track published successfully, RTP->LiveKit bridge established")
 	return nil
 }
 

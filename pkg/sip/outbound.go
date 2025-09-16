@@ -87,20 +87,54 @@ type outboundCall struct {
 }
 
 func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Logger, id LocalTag, room RoomConfig, sipConf sipOutboundConfig, state *CallState, projectID string) (*outboundCall, error) {
+	log.Infow("Creating new outbound SIP call",
+		"localTag", id,
+		"projectID", projectID,
+		"sipAddress", sipConf.address,
+		"sipTransport", sipConf.transport,
+		"sipHost", sipConf.host,
+		"sipFrom", sipConf.from,
+		"sipTo", sipConf.to,
+		"sipUser", sipConf.user,
+		"sipPassSet", sipConf.pass != "",
+		"dtmf", sipConf.dtmf,
+		"dialtone", sipConf.dialtone,
+		"headers", sipConf.headers,
+		"includeHeaders", sipConf.includeHeaders,
+		"headersToAttrs", sipConf.headersToAttrs,
+		"attrsToHeaders", sipConf.attrsToHeaders,
+		"ringingTimeout", sipConf.ringingTimeout,
+		"maxCallDuration", sipConf.maxCallDuration,
+		"enabledFeatures", sipConf.enabledFeatures,
+		"mediaEncryption", sipConf.mediaEncryption)
+
 	if sipConf.maxCallDuration <= 0 || sipConf.maxCallDuration > maxCallDuration {
+		log.Infow("Adjusting max call duration",
+			"original", sipConf.maxCallDuration,
+			"adjusted", maxCallDuration)
 		sipConf.maxCallDuration = maxCallDuration
 	}
 	if sipConf.ringingTimeout <= 0 {
+		log.Infow("Adjusting ringing timeout",
+			"original", sipConf.ringingTimeout,
+			"adjusted", defaultRingingTimeout)
 		sipConf.ringingTimeout = defaultRingingTimeout
 	}
 	jitterBuf := SelectValueBool(conf.EnableJitterBuffer, conf.EnableJitterBufferProb)
 	room.JitterBuf = jitterBuf
+	log.Infow("Jitter buffer configuration", "enabled", jitterBuf)
 
 	tr := TransportFrom(sipConf.transport)
 	contact := c.ContactURI(tr)
 	if sipConf.host == "" {
+		log.Infow("No host specified, using default", "defaultHost", "v2.stringee.com")
 		sipConf.host = "v2.stringee.com"
 	}
+	log.Infow("Transport and contact configuration",
+		"transport", tr,
+		"contactURI", contact,
+		"finalHost", sipConf.host)
+
 	call := &outboundCall{
 		c:         c,
 		log:       log,
@@ -110,12 +144,16 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 		projectID: projectID,
 	}
 	call.log = call.log.WithValues("jitterBuf", call.jitterBuf)
-	call.cc = c.newOutbound(log, id, URI{
+
+	fromURI := URI{
 		User:      "1167400_revveai_agent_01",
 		Host:      sipConf.host,
 		Addr:      contact.Addr,
 		Transport: tr,
-	}, contact, func(headers map[string]string) map[string]string {
+	}
+	log.Infow("Creating SIP outbound handler", "fromURI", fromURI)
+
+	call.cc = c.newOutbound(log, id, fromURI, contact, func(headers map[string]string) map[string]string {
 		c := call
 		if len(c.sipConf.attrsToHeaders) == 0 {
 			return headers
@@ -130,6 +168,13 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 	call.mon = c.mon.NewCall(stats.Outbound, sipConf.host, sipConf.address)
 	var err error
 
+	log.Infow("Creating MediaPort for outbound call",
+		"mediaIP", c.sconf.MediaIP,
+		"rtpPorts", conf.RTPPort,
+		"mediaTimeoutInitial", c.conf.MediaTimeoutInitial,
+		"mediaTimeout", c.conf.MediaTimeout,
+		"sampleRate", RoomSampleRate)
+
 	call.media, err = NewMediaPort(call.log, call.mon, &MediaOptions{
 		IP:                  c.sconf.MediaIP,
 		Ports:               conf.RTPPort,
@@ -139,20 +184,31 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 		Stats:               &call.stats.Port,
 	}, RoomSampleRate)
 	if err != nil {
+		log.Errorw("Failed to create MediaPort for outbound call", err)
 		call.close(errors.Wrap(err, "media failed"), callDropped, "media-failed", livekit.DisconnectReason_UNKNOWN_REASON)
 		return nil, err
 	}
+	log.Infow("MediaPort created successfully for outbound call")
+
 	call.media.SetDTMFAudio(conf.AudioDTMF)
 	call.media.EnableTimeout(false)
 	call.media.DisableOut() // disabled until we get 200
+	log.Infow("Media configuration set",
+		"dtmfAudio", conf.AudioDTMF,
+		"timeoutEnabled", false,
+		"outputEnabled", false)
+
 	if err := call.connectToRoom(ctx, room); err != nil {
+		log.Errorw("Failed to connect to LiveKit room", err)
 		call.close(errors.Wrap(err, "room join failed"), callDropped, "join-failed", livekit.DisconnectReason_UNKNOWN_REASON)
 		return nil, fmt.Errorf("update room failed: %w", err)
 	}
+	log.Infow("Successfully connected to LiveKit room", "roomName", room.RoomName)
 
 	c.cmu.Lock()
 	defer c.cmu.Unlock()
 	c.activeCalls[id] = call
+	log.Infow("Outbound call created and registered", "callID", id, "totalActiveCalls", len(c.activeCalls))
 	return call, nil
 }
 
@@ -367,7 +423,7 @@ func (c *outboundCall) connectToRoom(ctx context.Context, lkNew RoomConfig) erro
 
 	attrs[livekit.AttrSIPCallStatus] = CallDialing.Attribute()
 	lkNew.Participant.Attributes = attrs
-	r := NewRoom(c.log, &c.stats.Room, c.c.conf)
+	r := NewRoom(c.log, &c.stats.Room)
 	if err := r.Connect(c.c.conf, lkNew); err != nil {
 		return err
 	}
