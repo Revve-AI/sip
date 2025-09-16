@@ -80,9 +80,46 @@ func BuildDocker() error {
 	)
 }
 
+// BuildDockerDeepFilterNet2 builds Docker image with DeepFilterNet2 support
+func BuildDockerDeepFilterNet2() error {
+	// Check if models directory exists
+	if _, err := os.Stat("models/deepfilternet2"); os.IsNotExist(err) {
+		return fmt.Errorf("DeepFilterNet2 models not found at models/deepfilternet2/. Please ensure models are placed there")
+	}
+
+	// Verify required model files
+	requiredModels := []string{
+		"models/deepfilternet2/enc.onnx",
+		"models/deepfilternet2/erb_dec.onnx",
+		"models/deepfilternet2/df_dec.onnx",
+	}
+
+	for _, model := range requiredModels {
+		if _, err := os.Stat(model); os.IsNotExist(err) {
+			fmt.Printf("Warning: Model file %s not found\n", model)
+		}
+	}
+
+	return mageutil.Run(context.Background(),
+		fmt.Sprintf("docker build --no-cache --progress=plain -t %s:deepfilternet2 -f build/sip/Dockerfile .", imageName),
+	)
+}
+
 func BuildDockerLinux() error {
 	return mageutil.Run(context.Background(),
 		fmt.Sprintf("docker build --platform linux/amd64 -t %s:latest -f build/sip/Dockerfile .", imageName),
+	)
+}
+
+// BuildDockerLinuxDeepFilterNet2 builds Linux Docker image with DeepFilterNet2 support
+func BuildDockerLinuxDeepFilterNet2() error {
+	// Check if models directory exists
+	if _, err := os.Stat("models/deepfilternet2"); os.IsNotExist(err) {
+		return fmt.Errorf("DeepFilterNet2 models not found at models/deepfilternet2/. Please ensure models are placed there")
+	}
+
+	return mageutil.Run(context.Background(),
+		fmt.Sprintf("docker build --platform linux/amd64 -t %s:deepfilternet2 -f build/sip/Dockerfile .", imageName),
 	)
 }
 

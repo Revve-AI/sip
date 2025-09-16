@@ -33,6 +33,7 @@ import (
 	lksdk "github.com/livekit/server-sdk-go/v2"
 
 	"github.com/livekit/sip/pkg/config"
+	"github.com/livekit/sip/pkg/deepfilternet2"
 	"github.com/livekit/sip/pkg/media/opus"
 	"github.com/livekit/sip/pkg/mixer"
 )
@@ -90,12 +91,33 @@ type RoomConfig struct {
 	JitterBuf   bool
 }
 
-func NewRoom(log logger.Logger, st *RoomStats) *Room {
+func NewRoom(log logger.Logger, st *RoomStats, conf *config.Config) *Room {
 	if st == nil {
 		st = &RoomStats{}
 	}
 	r := &Room{log: log, stats: st, out: msdk.NewSwitchWriter(RoomSampleRate)}
+
 	out := newMediaWriterCount(r.out, &st.OutputFrames, &st.OutputSamples)
+
+	// Apply DeepFilterNet2 noise suppression if enabled
+	if conf != nil && conf.EnableDeepFilterNet2 {
+		log.Infow("enabling DeepFilterNet2 for audio noise suppression")
+		modelsPath := conf.DeepFilterNet2ModelsPath
+		if modelsPath == "" {
+			modelsPath = "./models/deepfilternet2"
+			log.Debugw("using default DeepFilterNet2 models path", "path", modelsPath)
+		}
+
+		if dfnOut, err := deepfilternet2.NewPCM16Writer(out, modelsPath, log.WithValues("component", "deepfilternet2")); err != nil {
+			log.Warnw("failed to create DeepFilterNet2 writer, continuing without noise filtering", err, "modelsPath", modelsPath)
+		} else {
+			out = dfnOut
+			log.Infow("DeepFilterNet2 noise suppression enabled successfully", "modelsPath", modelsPath)
+		}
+	} else {
+		log.Debugw("DeepFilterNet2 disabled", "enabled", conf != nil && conf.EnableDeepFilterNet2)
+	}
+
 	r.mix = mixer.NewMixer(out, rtp.DefFrameDur, &st.Mixer)
 
 	roomLog, resolve := log.WithDeferredValues()

@@ -481,7 +481,7 @@ func (s *Server) newInboundCall(
 		projectID:  "", // Will be set in handleInvite when available
 	}
 	// we need it created earlier so that the audio mixer is available for pin prompts
-	c.lkRoom = NewRoom(log, &c.stats.Room)
+	c.lkRoom = NewRoom(log, &c.stats.Room, s.conf)
 	c.log = c.log.WithValues("jitterBuf", c.jitterBuf)
 	c.ctx, c.cancel = context.WithCancel(context.Background())
 	s.cmu.Lock()
