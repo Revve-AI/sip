@@ -720,13 +720,17 @@ func (c *outboundCall) transferCall(ctx context.Context, transferTo string, head
 func (c *Client) newOutbound(log logger.Logger, id LocalTag, from, contact URI, getHeaders setHeadersFunc) *sipOutbound {
 	from = from.Normalize()
 	c.log.Infow("origin uri address lk sip", "uri", from.GetURI().String())
-	fromURI := sip.Uri{
-		Scheme: from.GetURI().Scheme,
-		User:   from.GetURI().User,
-		Host:   from.GetURI().Host,
-		// Deliberately omit Port field
+	fromURI := *from.GetURI()
+	if strings.Contains(fromURI.String(), "stringee") {
+		fromURI = sip.Uri{
+			Scheme: from.GetURI().Scheme,
+			User:   from.GetURI().User,
+			Host:   from.GetURI().Host,
+			// Deliberately omit Port field
+		}
 	}
-	c.log.Infow("stringee uri address lk sip", "uri", fromURI.String())
+
+	c.log.Infow("using uri address", "uri", fromURI.String())
 	fromHeader := &sip.FromHeader{
 		DisplayName: from.User,
 		Address:     fromURI,
