@@ -719,9 +719,15 @@ func (c *outboundCall) transferCall(ctx context.Context, transferTo string, head
 
 func (c *Client) newOutbound(log logger.Logger, id LocalTag, from, contact URI, getHeaders setHeadersFunc) *sipOutbound {
 	from = from.Normalize()
+	fromURI := sip.Uri{
+		Scheme: from.GetURI().Scheme,
+		User:   from.GetURI().User,
+		Host:   from.GetURI().Host,
+		// Deliberately omit Port field
+	}
 	fromHeader := &sip.FromHeader{
 		DisplayName: from.User,
-		Address:     *from.GetURI(),
+		Address:     fromURI,
 		Params:      sip.NewParams(),
 	}
 	contactHeader := &sip.ContactHeader{
