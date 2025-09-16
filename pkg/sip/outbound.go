@@ -719,12 +719,14 @@ func (c *outboundCall) transferCall(ctx context.Context, transferTo string, head
 
 func (c *Client) newOutbound(log logger.Logger, id LocalTag, from, contact URI, getHeaders setHeadersFunc) *sipOutbound {
 	from = from.Normalize()
+	c.log.Infow("origin uri address lk sip", "uri", from.GetURI().String())
 	fromURI := sip.Uri{
 		Scheme: from.GetURI().Scheme,
 		User:   from.GetURI().User,
 		Host:   from.GetURI().Host,
 		// Deliberately omit Port field
 	}
+	c.log.Infow("stringee uri address lk sip", "uri", fromURI.String())
 	fromHeader := &sip.FromHeader{
 		DisplayName: from.User,
 		Address:     fromURI,
@@ -925,9 +927,9 @@ authLoop:
 		req.Recipient = cont.Address
 		c.log.Infow("request recipient Port", "recipient Port", req.Recipient.Port)
 		c.log.Infow("request recipient string", "recipient string", req.Recipient.String())
-		//if req.Recipient.Port == 0 {
-		//	req.Recipient.Port = 5060
-		//}
+		if req.Recipient.Port == 0 {
+			req.Recipient.Port = 5060
+		}
 	}
 
 	if recordRouteHeader := resp.RecordRoute(); recordRouteHeader != nil {
