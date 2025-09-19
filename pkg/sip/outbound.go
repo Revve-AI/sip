@@ -152,8 +152,8 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 	call.log = call.log.WithValues("jitterBuf", call.jitterBuf)
 
 	user := sipConf.from
-	// this fix for support stringee sip provider in Vietnam
-	if strings.Contains(sipConf.address, "stringee") {
+	// this fix for support stringee, mitek sip provider in Vietnam
+	if strings.Contains(sipConf.address, "stringee") || strings.Contains(sipConf.address, "221.132.18.218") {
 		user = sipConf.user
 	}
 	fromURI := URI{
