@@ -152,8 +152,8 @@ func (c *Client) newCall(ctx context.Context, conf *config.Config, log logger.Lo
 	call.log = call.log.WithValues("jitterBuf", call.jitterBuf)
 
 	user := sipConf.from
-	// this fix for support stringee, mitek sip provider in Vietnam
-	if strings.Contains(sipConf.address, "stringee") || strings.Contains(sipConf.address, "221.132.18.218") {
+	// this fix for support Vietnamese sip providers
+	if conf.IsVietnameseProvider(sipConf.address) {
 		user = sipConf.user
 	}
 	fromURI := URI{
@@ -721,7 +721,7 @@ func (c *Client) newOutbound(log logger.Logger, id LocalTag, from, contact URI, 
 	from = from.Normalize()
 	c.log.Infow("origin uri address lk sip", "uri", from.GetURI().String())
 	fromURI := *from.GetURI()
-	if strings.Contains(fromURI.String(), "stringee") {
+	if c.conf.IsVietnameseProvider(fromURI.String()) {
 		fromURI = sip.Uri{
 			Scheme: from.GetURI().Scheme,
 			User:   from.GetURI().User,

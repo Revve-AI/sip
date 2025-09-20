@@ -19,6 +19,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -99,6 +100,9 @@ type Config struct {
 	EnableJitterBuffer     bool    `yaml:"enable_jitter_buffer"`
 	EnableJitterBufferProb float64 `yaml:"enable_jitter_buffer_prob"`
 
+	// Vietnamese SIP provider configuration
+	VietnameseProviders []string `yaml:"vietnamese_providers"`
+
 	// internal
 	ServiceName string `yaml:"-"`
 	NodeID      string // Do not provide, will be overwritten
@@ -110,6 +114,8 @@ func NewConfig(confString string) (*Config, error) {
 		ApiSecret:   os.Getenv("LIVEKIT_API_SECRET"),
 		WsUrl:       os.Getenv("LIVEKIT_WS_URL"),
 		ServiceName: "sip",
+		// Default Vietnamese providers - can be overridden by config file or environment
+		VietnameseProviders: []string{"stringee", "221.132.18.218"},
 	}
 	if confString != "" {
 		if err := yaml.Unmarshal([]byte(confString), conf); err != nil {
@@ -240,4 +246,14 @@ func GetLocalIP() (netip.Addr, error) {
 		return netip.Addr{}, fmt.Errorf("No local IP found")
 	}
 	return candidates[0].Addr, nil
+}
+
+// IsVietnameseProvider checks if the given address contains any Vietnamese provider identifier
+func (c *Config) IsVietnameseProvider(address string) bool {
+	for _, provider := range c.VietnameseProviders {
+		if provider != "" && strings.Contains(address, provider) {
+			return true
+		}
+	}
+	return false
 }
